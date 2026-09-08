@@ -1,0 +1,2 @@
+# Unit tests for pure codec (no FastMCP required)
+pytest>=7.4.0
