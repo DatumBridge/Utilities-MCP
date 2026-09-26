@@ -32,6 +32,7 @@ def register(mcp) -> None:
         content: Optional[str] = Field(
             default=None,
             description="UTF-8 plaintext to encode (e.g. articlesText). Provide content OR json, not both.",
+        json_schema_extra={"x-datumbridge-encoding": "plain"}
         ),
         json: Optional[Any] = Field(
             default=None,
@@ -45,6 +46,10 @@ def register(mcp) -> None:
         """
         Encode UTF-8 string or JSON to standard Base64 for upload_file.content_base64.
         Prefer this tool over inventing Base64 in an LLM stage.
+        
+
+        Capabilities: utilities.encode_base64
+Outputs: success
         """
         try:
             b64, n = encode_b64(content=content, json_value=json, encoding=encoding)
@@ -55,14 +60,18 @@ def register(mcp) -> None:
 
     @mcp.tool()
     def decode_base64(
-        content_base64: str = Field(..., description="Standard Base64 payload"),
+        content_base64: str = Field(..., description="Standard Base64 payload", json_schema_extra={"x-datumbridge-encoding": "base64"}),
         as_format: str = Field(
             default="text",
             description="Decode as 'text' (UTF-8 string) or 'json' (parse after UTF-8 decode). Catalog alias: as.",
         ),
         encoding: str = Field(default="utf-8", description="Only utf-8 supported"),
     ) -> DecodeBase64Response:
-        """Decode Base64 to UTF-8 text or JSON. Fail closed on invalid Base64 / UTF-8 / JSON."""
+        """Decode Base64 to UTF-8 text or JSON. Fail closed on invalid Base64 / UTF-8 / JSON.
+
+        Capabilities: utilities.decode_base64
+Outputs: success
+        """
         try:
             text, parsed, n = decode_b64(
                 content_base64, as_format=as_format, encoding=encoding
@@ -82,7 +91,11 @@ def register(mcp) -> None:
             description="Indent spaces; null for compact JSON",
         ),
     ) -> JsonStringifyResponse:
-        """Serialize a value to JSON text (ensure_ascii=False)."""
+        """Serialize a value to JSON text (ensure_ascii=False).
+
+        Capabilities: utilities.json_stringify
+Outputs: success
+        """
         try:
             return JsonStringifyResponse(
                 success=True, text=stringify_json(value, indent=indent)
@@ -92,9 +105,13 @@ def register(mcp) -> None:
 
     @mcp.tool()
     def json_parse(
-        text: str = Field(..., description="JSON text to parse"),
+        text: str = Field(..., description="JSON text to parse", json_schema_extra={"x-datumbridge-encoding": "plain"}),
     ) -> JsonParseResponse:
-        """Parse JSON text into a value. Fail closed on invalid JSON."""
+        """Parse JSON text into a value. Fail closed on invalid JSON.
+
+        Capabilities: utilities.json_parse
+Outputs: success
+        """
         try:
             return JsonParseResponse(success=True, value=parse_json(text))
         except CodecError as e:
