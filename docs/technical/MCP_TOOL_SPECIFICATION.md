@@ -36,6 +36,23 @@ Auth: none (pure functions).
 |-------|------|----------|-------|
 | text | string | yes | |
 
+## create_docx / update_docx / create_xlsx / update_xlsx / create_pptx / update_pptx
+
+In-memory Office Open XML. Success: `{ success, content_base64, file_name, mime_type, byte_length, replacements }`.
+
+| Tool | Required | Notes |
+|------|----------|-------|
+| create_docx | title, paragraphs, or tables | `.docx` |
+| update_docx | content_base64 plus one edit | replacements, then append |
+| create_xlsx | sheets | cell strings stored as text, not formulas |
+| update_xlsx | content_base64 plus one edit | add sheets, set cells, append rows |
+| create_pptx | slides | 16:9, Title and Body shapes |
+| update_pptx | content_base64 plus one edit | replacements, titles, append slides |
+
+Argument samples: `registry_docs/<tool>.md`. Limits: [configuration.md](configuration.md).
+
 ## Error codes
 
-`VALIDATION_ERROR`, `UNSUPPORTED_ENCODING`, `INVALID_BASE64`, `UTF8_DECODE_ERROR`, `JSON_ENCODE_ERROR`, `JSON_PARSE_ERROR`.
+Codec: `VALIDATION_ERROR`, `UNSUPPORTED_ENCODING`, `INVALID_BASE64`, `UTF8_DECODE_ERROR`, `JSON_ENCODE_ERROR`, `JSON_PARSE_ERROR`.
+
+Office: `VALIDATION_ERROR`, `INVALID_BASE64` (update only), `INVALID_OFFICE_FILE`. `retryable` is false. `original_provider_error` is null.

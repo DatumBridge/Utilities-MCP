@@ -26,13 +26,18 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP(
     name="utilities",
     instructions="""
-    Weaver Utilities MCP provides mechanical reshape tools (no cloud I/O):
+    Weaver Utilities MCP provides mechanical reshape tools (no cloud I/O, no disk writes):
     - encode_base64: UTF-8 string or JSON → standard Base64 (for Drive/Office upload_file.content_base64)
     - decode_base64: Base64 → text or JSON
     - json_stringify / json_parse: deterministic JSON text ↔ value
+    - create_docx / update_docx, create_xlsx / update_xlsx, create_pptx / update_pptx:
+      build or edit Office Open XML in memory and return content_base64.
+      Spreadsheet strings are text, not formulas.
+      Store with Google Drive upload_file, or Office 365 create_file (confirm=true, 4 MiB).
 
-    Prefer these over LLM-invented Base64. Typical chain:
-    articlesText → encode_base64 → upload_file.content_base64
+    Prefer these over LLM-invented Base64 or Office bytes. Typical chains:
+    articlesText → encode_base64 → Drive upload_file.content_base64 or Office 365 create_file.content_base64
+    create_docx → Drive upload_file.content_base64 or Office 365 create_file.content_base64
     """,
 )
 

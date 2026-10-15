@@ -11,6 +11,9 @@ Base64 encode/decode and JSON stringify/parse. No cloud credentials.
 | `decode_base64` | `content_base64` → `text` or parsed `json` (`as_format`: `text` \| `json`) |
 | `json_stringify` | Value → JSON text (`ensure_ascii=False`) |
 | `json_parse` | JSON text → value (fail closed) |
+| `create_docx` / `update_docx` | Word `.docx` in memory → `content_base64` |
+| `create_xlsx` / `update_xlsx` | Excel `.xlsx` in memory → `content_base64` (strings are text, not formulas) |
+| `create_pptx` / `update_pptx` | PowerPoint `.pptx` in memory → `content_base64` |
 
 ## Typical Design chain (Drive upload)
 
@@ -24,7 +27,21 @@ stage-create-articles (llm)
          content_base64 ← encode_base64.output.content_base64
 ```
 
-Do **not** ask an LLM to invent `contentBase64`.
+Do **not** ask an LLM to invent `contentBase64` or Office file bytes.
+
+## Office file, then upload
+
+```text
+create_docx | create_xlsx | create_pptx
+  outputs: content_base64, file_name, mime_type
+    → Google Drive upload_file, or Office 365 create_file (confirm=true)
+         content_base64 ← content_base64
+         file_name ← file_name
+```
+
+Office 365 `create_file` is a simple upload capped at 4 MiB. This server allows 8 MiB, so a larger package must use Drive.
+
+`update_*` takes `content_base64` from `create_*` or from a download. It does not write disk. See `docs/adr/ADR-0001-office-ooxml-in-memory.md`.
 
 ## Run locally
 
@@ -37,7 +54,7 @@ uvicorn app.mcp_server:http_app --host 0.0.0.0 --port 8000
 pytest -q
 ```
 
-Codec unit tests need only `requirements_dev.txt` (no FastMCP).
+Codec unit tests need only `requirements_dev.txt` (no FastMCP). Office tests need `requirements_mcp.txt` (`python-docx`, `openpyxl`, `python-pptx`).
 stdio: `python -m app.mcp_server`
 
 ## Docker
@@ -51,6 +68,6 @@ docker run --rm -p 8000:8000 utilities-mcp
 
 Publish into Tool Registry / Integrations as **Utilities MCP** / host `utilities-mcp-main` (no vault inject — pure tools). See ADR-0097.
 
-## Out of scope (v1)
+## Out of scope
 
-File I/O, network, secrets, HTML→PDF, zip, domain “marketing → Drive” recipes.
+Disk or network I/O, secrets, HTML→PDF, zip archives, legacy `.doc` / `.xls` / `.ppt`, and domain “marketing → Drive” recipes. Office Open XML create/update is in memory only (ADR-0001).
