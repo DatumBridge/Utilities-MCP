@@ -28,9 +28,9 @@ Updates take `content_base64` of the same package type. The server checks ZIP si
 ## Trade-offs
 
 - Explicit stage instead of a hidden file write.
-- New native libraries (`python-docx`, `openpyxl`, `python-pptx`) increase the image. They do not add network clients.
+- New native libraries (`python-docx`, `openpyxl`, `python-pptx`, `lxml`) increase the image. They do not add network clients.
 
 ## Risks
 
-- Edits are paragraph and cell text, not full layout fidelity for files produced by another editor. Word and PowerPoint replacement rewrites the matching paragraph into its first run. Merged Word cells are edited once. Excel macros are dropped on save. A sheet named `Sheet` is kept.
+- Edits are paragraph and cell text, not full layout fidelity for files produced by another editor. Word and PowerPoint replacement edits only the runs that hold the match; a match that spans runs takes the formatting of the run where it starts. Merged Word cells are edited once. Word replacement also reaches footnotes, endnotes, comments, and text boxes and shapes; the DrawingML copy and its VML fallback are both edited and counted once. `update_xlsx` does not load the workbook with openpyxl, which would drop shapes and VBA on save. It edits worksheet XML in place with lxml and copies every other part byte for byte, so shapes, images, charts, pivot tables, and macros are kept; a macro-enabled workbook is returned as `.xlsm`. A write to a table header renames the table column and rewrites structured references to it, as Excel does; without that Excel refuses to open the file. Checked in Excel 16 (build 20430), Word 16, and PowerPoint 16 on 2026-10-19 against files Excel and Word created. A sheet named `Sheet` is kept.
 - The 8 MiB cap rejects large workbooks. Raising it needs a documented limit change.

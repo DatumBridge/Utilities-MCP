@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 from pydantic import Field
 
 from app.core.exceptions import OfficeDocumentError
+from app.schemas.inputs import JSON_LIST, PARAGRAPH_LIST, Text
 from app.schemas.office import (
     DocxParagraph,
     DocxTable,
@@ -90,17 +91,17 @@ def register(mcp) -> None:
             default=None,
             description="Base name ending with .docx. Default document.docx. Not a path.",
         ),
-        title: Optional[str] = Field(
+        title: Optional[Text] = Field(
             default=None,
             description="Document title, written as Heading 1.",
             json_schema_extra={"x-datumbridge-encoding": "plain"},
         ),
-        paragraphs: Optional[list[DocxParagraph]] = Field(
+        paragraphs: Annotated[Optional[list[DocxParagraph]], PARAGRAPH_LIST] = Field(
             default=None,
             description="Body paragraphs or headings, in order, after the title.",
             json_schema_extra=_PLAIN_TEXT,
         ),
-        tables: Optional[list[DocxTable]] = Field(
+        tables: Annotated[Optional[list[DocxTable]], JSON_LIST] = Field(
             default=None,
             description="Tables appended after the paragraphs.",
             json_schema_extra=_PLAIN,
@@ -136,17 +137,17 @@ Outputs: success, content_base64, file_name, mime_type, byte_length
             default=None,
             description="Base name ending with .docx for the returned package. Default document.docx.",
         ),
-        append_paragraphs: Optional[list[DocxParagraph]] = Field(
+        append_paragraphs: Annotated[Optional[list[DocxParagraph]], PARAGRAPH_LIST] = Field(
             default=None,
             description="Paragraphs appended after existing content.",
             json_schema_extra=_PLAIN_TEXT,
         ),
-        append_tables: Optional[list[DocxTable]] = Field(
+        append_tables: Annotated[Optional[list[DocxTable]], JSON_LIST] = Field(
             default=None,
             description="Tables appended after existing content.",
             json_schema_extra=_PLAIN,
         ),
-        replacements: Optional[list[TextReplace]] = Field(
+        replacements: Annotated[Optional[list[TextReplace]], JSON_LIST] = Field(
             default=None,
             description="Literal find/replace on existing paragraphs, table cells, headers, and footers. Applied before appends.",
             json_schema_extra=_PLAIN,
@@ -174,7 +175,7 @@ Outputs: success, content_base64, file_name, mime_type, byte_length, replacement
 
     @mcp.tool()
     def create_xlsx(
-        sheets: list[XlsxSheet] = Field(
+        sheets: Annotated[list[XlsxSheet], JSON_LIST] = Field(
             ...,
             description="At least one worksheet. Strings are stored as text, including values that start with =.",
             json_schema_extra=_PLAIN,
@@ -205,19 +206,19 @@ Outputs: success, content_base64, file_name, mime_type, byte_length
         ),
         file_name: Optional[str] = Field(
             default=None,
-            description="Base name ending with .xlsx for the returned package. Default workbook.xlsx.",
+            description="Base name ending with .xlsx (.xlsm for a macro-enabled workbook) for the returned package. Default workbook.xlsx or workbook.xlsm.",
         ),
-        add_sheets: Optional[list[XlsxSheet]] = Field(
+        add_sheets: Annotated[Optional[list[XlsxSheet]], JSON_LIST] = Field(
             default=None,
             description="Sheets to add first, so later set_cells and append_rows can target them.",
             json_schema_extra=_PLAIN,
         ),
-        set_cells: Optional[list[XlsxSetCell]] = Field(
+        set_cells: Annotated[Optional[list[XlsxSetCell]], JSON_LIST] = Field(
             default=None,
             description="Cells to write. Strings are stored as text, not formulas.",
             json_schema_extra=_PLAIN,
         ),
-        append_rows: Optional[list[XlsxAppendRows]] = Field(
+        append_rows: Annotated[Optional[list[XlsxAppendRows]], JSON_LIST] = Field(
             default=None,
             description="Rows appended after the last used row of the named sheet.",
             json_schema_extra=_PLAIN,
@@ -245,7 +246,7 @@ Outputs: success, content_base64, file_name, mime_type, byte_length
 
     @mcp.tool()
     def create_pptx(
-        slides: list[PptxSlide] = Field(
+        slides: Annotated[list[PptxSlide], JSON_LIST] = Field(
             ...,
             description="At least one slide. Each slide needs a title or at least one bullet.",
             json_schema_extra=_PLAIN,
@@ -278,17 +279,17 @@ Outputs: success, content_base64, file_name, mime_type, byte_length
             default=None,
             description="Base name ending with .pptx for the returned package. Default presentation.pptx.",
         ),
-        replacements: Optional[list[TextReplace]] = Field(
+        replacements: Annotated[Optional[list[TextReplace]], JSON_LIST] = Field(
             default=None,
             description="Literal find/replace on slide text, tables, and speaker notes. Applied first.",
             json_schema_extra=_PLAIN,
         ),
-        set_slide_titles: Optional[list[PptxSetTitle]] = Field(
+        set_slide_titles: Annotated[Optional[list[PptxSetTitle]], JSON_LIST] = Field(
             default=None,
             description="Replace a slide title by zero-based index. Applied after replacements.",
             json_schema_extra=_PLAIN_TITLE,
         ),
-        append_slides: Optional[list[PptxSlide]] = Field(
+        append_slides: Annotated[Optional[list[PptxSlide]], JSON_LIST] = Field(
             default=None,
             description="Slides appended at the end. Applied last.",
             json_schema_extra=_PLAIN,

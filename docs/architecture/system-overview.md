@@ -13,10 +13,10 @@ Codec tools (`encode_base64`, `decode_base64`, `json_stringify`, `json_parse`) a
 ## Dependencies
 
 - FastMCP
-- `python-docx`, `openpyxl`, `python-pptx` (in-process only)
+- `python-docx`, `openpyxl`, `python-pptx`, `lxml` (in-process only)
 
 ## Risks
 
 - An 8 MiB cap rejects larger decks and workbooks.
-- Editing a file from another program rewrites the package. Word replacement flattens the matching paragraph into its first run. Excel macros are not kept. New slides use a blank layout plus Title and Body text boxes.
+- Editing a Word or PowerPoint file from another program rewrites the package through python-docx or python-pptx. Replacement edits only the runs that hold the match. `update_xlsx` edits worksheet XML in place and keeps every other part, including shapes and macros. New slides use a blank layout plus Title and Body text boxes.
 - Spreadsheet strings are text, so `=1+1` is not calculated.

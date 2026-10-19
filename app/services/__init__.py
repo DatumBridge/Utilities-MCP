@@ -6,6 +6,8 @@ import base64
 import json
 from typing import Any
 
+from app.services.base64_forms import standard_base64
+
 
 class CodecError(Exception):
     def __init__(self, code: str, message: str):
@@ -72,7 +74,7 @@ def decode_base64(
     fmt = (as_format or "text").strip().lower()
     if fmt not in ("text", "json"):
         raise CodecError("VALIDATION_ERROR", "as must be 'text' or 'json'")
-    s = "".join((content_base64 or "").split())
+    s = standard_base64("".join((content_base64 or "").split()))
     if not s:
         raise CodecError("VALIDATION_ERROR", "content_base64 is required")
     try:

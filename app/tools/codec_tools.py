@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
+from app.schemas.inputs import BLANK_DEFAULT, INT_TEXT, JSON_TEXT, JSON_VALUE, Text
 from app.schemas import (
     DecodeBase64Response,
     EncodeBase64Response,
@@ -29,16 +30,16 @@ def _err(exc: CodecError) -> ErrorBody:
 def register(mcp) -> None:
     @mcp.tool()
     def encode_base64(
-        content: Optional[str] = Field(
+        content: Annotated[Optional[Text], BLANK_DEFAULT] = Field(
             default=None,
             description="UTF-8 plaintext to encode (e.g. articlesText). Provide content OR json, not both.",
         json_schema_extra={"x-datumbridge-encoding": "plain"}
         ),
-        json: Optional[Any] = Field(
+        json: Annotated[Optional[Any], JSON_VALUE] = Field(
             default=None,
             description="JSON value (object/array/scalar) to serialize with ensure_ascii=False then encode.",
         ),
-        encoding: str = Field(
+        encoding: Annotated[str, BLANK_DEFAULT] = Field(
             default="utf-8",
             description="Text encoding before Base64 (only utf-8 supported).",
         ),
@@ -61,11 +62,12 @@ Outputs: success
     @mcp.tool()
     def decode_base64(
         content_base64: str = Field(..., description="Standard Base64 payload", json_schema_extra={"x-datumbridge-encoding": "base64"}),
-        as_format: str = Field(
+        as_format: Annotated[str, BLANK_DEFAULT] = Field(
             default="text",
+            validation_alias=AliasChoices("as_format", "as"),
             description="Decode as 'text' (UTF-8 string) or 'json' (parse after UTF-8 decode). Catalog alias: as.",
         ),
-        encoding: str = Field(default="utf-8", description="Only utf-8 supported"),
+        encoding: Annotated[str, BLANK_DEFAULT] = Field(default="utf-8", description="Only utf-8 supported"),
     ) -> DecodeBase64Response:
         """Decode Base64 to UTF-8 text or JSON. Fail closed on invalid Base64 / UTF-8 / JSON.
 
@@ -85,8 +87,8 @@ Outputs: success
 
     @mcp.tool()
     def json_stringify(
-        value: Any = Field(..., description="Value to serialize (object/array/scalar)"),
-        indent: Optional[int] = Field(
+        value: Annotated[Any, JSON_VALUE] = Field(..., description="Value to serialize (object/array/scalar)"),
+        indent: Annotated[Optional[int], INT_TEXT] = Field(
             default=2,
             description="Indent spaces; null for compact JSON",
         ),
@@ -105,7 +107,7 @@ Outputs: success
 
     @mcp.tool()
     def json_parse(
-        text: str = Field(..., description="JSON text to parse", json_schema_extra={"x-datumbridge-encoding": "plain"}),
+        text: Annotated[str, JSON_TEXT] = Field(..., description="JSON text to parse", json_schema_extra={"x-datumbridge-encoding": "plain"}),
     ) -> JsonParseResponse:
         """Parse JSON text into a value. Fail closed on invalid JSON.
 

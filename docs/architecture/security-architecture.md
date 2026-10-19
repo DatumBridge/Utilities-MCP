@@ -4,7 +4,7 @@
 
 - No credentials, tokens, or vault fields.
 - No network calls from the Office tools.
-- No path writes. Word and PowerPoint save to a memory buffer. Excel worksheet XML is written with openpyxl's stream writer into a `BytesIO`, then into the ZIP buffer. The library's temp-file writer is not used.
+- No path writes. Word and PowerPoint save to a memory buffer. `create_xlsx` writes worksheet XML with openpyxl's stream writer into a `BytesIO`, then into the ZIP buffer; the library's temp-file writer is not used. `update_xlsx` parses package XML with lxml (entities and network access off) and writes the new ZIP to a `BytesIO`.
 - `file_name` is a base name. `/`, `\`, and `..` are rejected.
 
 ## Untrusted bytes
