@@ -54,7 +54,7 @@ uvicorn app.mcp_server:http_app --host 0.0.0.0 --port 8000
 pytest -q
 ```
 
-Codec unit tests need only `requirements_dev.txt` (no FastMCP). Office tests need `requirements_mcp.txt` (`python-docx`, `openpyxl`, `python-pptx`).
+Codec unit tests need only `requirements_dev.txt` (no FastMCP). Office tests need `requirements_mcp.txt` (`python-docx`, `openpyxl`, `python-pptx`, `lxml`).
 stdio: `python -m app.mcp_server`
 
 ## Docker

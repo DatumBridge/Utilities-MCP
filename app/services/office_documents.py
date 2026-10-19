@@ -14,14 +14,22 @@ import threading
 import zipfile
 from dataclasses import dataclass
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.utils.cell import coordinate_to_tuple
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Emu, Inches, Pt
 from docx import Document
+from docx.opc.constants import RELATIONSHIP_TYPE
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsmap, qn
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
+from lxml import etree
 
 from app.core.exceptions import OfficeDocumentError
+from app.services.base64_forms import standard_base64
+from app.services.xlsx_package import XlsxPackage
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_BASE64_CHARS = 12_000_000
@@ -44,23 +52,27 @@ MAX_REPLACEMENTS = 50
 
 MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+MIME_XLSM = "application/vnd.ms-excel.sheet.macroEnabled.12"
 MIME_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 _PARTS = {
     "docx": "word/document.xml",
     "xlsx": "xl/workbook.xml",
+    "xlsm": "xl/workbook.xml",
     "pptx": "ppt/presentation.xml",
 }
 _DEFAULT_NAMES = {
     "docx": "document.docx",
     "xlsx": "workbook.xlsx",
+    "xlsm": "workbook.xlsm",
     "pptx": "presentation.pptx",
 }
-_MIMES = {"docx": MIME_DOCX, "xlsx": MIME_XLSX, "pptx": MIME_PPTX}
+_MIMES = {"docx": MIME_DOCX, "xlsx": MIME_XLSX, "xlsm": MIME_XLSM, "pptx": MIME_PPTX}
 _STEM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,80}$")
 _BAD_SHEET = re.compile(r"[\\*?:/\[\]]")
 _CELL_REF = re.compile(r"^[A-Z]{1,3}[1-9][0-9]{0,6}$")
 _XLSX_SAVE_LOCK = threading.Lock()
+_DOCX_NOTE_RELS = (RELATIONSHIP_TYPE.FOOTNOTES, RELATIONSHIP_TYPE.ENDNOTES, RELATIONSHIP_TYPE.COMMENTS)
 
 
 @dataclass(frozen=True)
@@ -159,7 +171,6 @@ def update_xlsx(
     append_rows: list | None = None,
     add_sheets: list | None = None,
 ) -> OfficeFile:
-    name = _file_name(file_name, "xlsx")
     budget = _new_budget()
     cells = _parse_set_cells(set_cells, budget)
     appends = _parse_appends(append_rows, budget)
@@ -169,24 +180,30 @@ def update_xlsx(
             "VALIDATION_ERROR",
             "Provide at least one of set_cells, append_rows, or add_sheets",
         )
-    workbook = _open_xlsx(_decode_package(content_base64, "xlsx"))
+    package = XlsxPackage(_decode_package(content_base64, "xlsx"))
+    kind = "xlsm" if package.macro_enabled else "xlsx"
+    name = _file_name(file_name, kind)
+    if sheets and package.sheet_count() + len(sheets) > MAX_SHEETS:
+        raise OfficeDocumentError("VALIDATION_ERROR", f"Too many sheets (max {MAX_SHEETS})")
     for spec in sheets:
-        if _find_sheet(workbook, spec["name"], required=False) is not None:
+        if package.find(spec["name"]) is not None:
             raise OfficeDocumentError("VALIDATION_ERROR", f"duplicate sheet name: {spec['name']}")
-        worksheet = workbook.create_sheet(spec["name"])
-        _write_sheet_body(worksheet, spec["headers"], spec["rows"])
+        worksheet = package.add_worksheet(spec["name"])
+        rows = ([spec["headers"]] if spec["headers"] else []) + spec["rows"]
+        for row_index, row_values in enumerate(rows, start=1):
+            for column, value in enumerate(row_values, start=1):
+                worksheet.write(row_index, column, value)
     for spec in cells:
-        worksheet = _find_sheet(workbook, spec["sheet"], required=True)
-        row, column = spec["row"], spec["column"]
-        _write_cell(worksheet.cell(row=row, column=column), spec["value"])
+        package.worksheet(spec["sheet"]).write(spec["row"], spec["column"], spec["value"])
     for spec in appends:
-        worksheet = _find_sheet(workbook, spec["sheet"], required=True)
-        start = _next_row(worksheet)
+        worksheet = package.worksheet(spec["sheet"])
+        start = worksheet.next_row()
         if start + len(spec["rows"]) - 1 > MAX_ROWS:
             raise OfficeDocumentError("VALIDATION_ERROR", f"Too many rows (max {MAX_ROWS})")
         for offset, row_values in enumerate(spec["rows"]):
-            _write_row(worksheet, start + offset, row_values)
-    return _package(workbook, name, "xlsx")
+            for column, value in enumerate(row_values, start=1):
+                worksheet.write(start + offset, column, value)
+    return _finish(package.save(), name, kind)
 
 
 def create_pptx(*, file_name: str | None = None, slides: list | None = None) -> OfficeFile:
@@ -369,6 +386,10 @@ def _add_docx_table(document, spec: dict) -> None:
     headers = spec["headers"]
     data_rows = spec["rows"]
     width = spec["width"]
+    # Word merges two tables with nothing between them into one table.
+    blocks = [child for child in document.element.body if child.tag != qn("w:sectPr")]
+    if blocks and blocks[-1].tag == qn("w:tbl"):
+        document.add_paragraph()
     table = document.add_table(rows=1, cols=width)
     table.style = "Table Grid"
     if headers:
@@ -386,54 +407,129 @@ def _add_docx_table(document, spec: dict) -> None:
             cells[index].text = row[index] if index < len(row) else ""
 
 
-def _replace_paragraph(paragraph, find: str, replace: str) -> int:
-    full = paragraph.text or ""
-    if find not in full:
+def _replace_runs(runs: list, find: str, replace: str) -> int:
+    """Replace text across runs. A match goes into the run where it starts; other runs keep their formatting."""
+    texts = [run.text or "" for run in runs]
+    full = "".join(texts)
+    starts = []
+    index = full.find(find)
+    while index != -1:
+        starts.append(index)
+        index = full.find(find, index + len(find))
+    if not starts:
         return 0
-    updated = full.replace(find, replace)
-    if paragraph.runs:
-        paragraph.runs[0].text = updated
-        for run in paragraph.runs[1:]:
-            run.text = ""
-    else:
-        paragraph.add_run(updated)
-    return full.count(find)
+    position = 0
+    match = 0
+    for run, text in zip(runs, texts):
+        pieces = []
+        for char in text:
+            while match < len(starts) and position >= starts[match] + len(find):
+                match += 1
+            if match < len(starts) and position >= starts[match]:
+                if position == starts[match]:
+                    pieces.append(replace)
+            else:
+                pieces.append(char)
+            position += 1
+        updated = "".join(pieces)
+        if updated != text:
+            run.text = updated
+    return len(starts)
 
 
-def _replace_docx(document, edits: list[tuple[str, str]]) -> int:
-    total = 0
-    paragraphs = []
-    seen: set[int] = set()
+def _docx_runs(paragraph) -> list:
+    # Paragraph.runs skips runs inside hyperlinks, but Paragraph.text includes them.
+    return [Run(element, paragraph) for element in paragraph._p.xpath("./w:r | ./w:hyperlink/w:r")]
 
-    def add(paragraph) -> None:
-        element = getattr(paragraph, "_p", None)
-        marker = id(element) if element is not None else id(paragraph)
-        if marker in seen:
-            return
-        seen.add(marker)
-        paragraphs.append(paragraph)
 
-    for paragraph in document.paragraphs:
-        add(paragraph)
-    seen_cells: set[int] = set()
-    for table in document.tables:
+def _docx_paragraphs(container, seen: set) -> list:
+    paragraphs = list(container.paragraphs)
+    for table in container.tables:
         for row in table.rows:
             for cell in row.cells:
                 # Merged cells repeat the anchor cell once per grid slot.
-                element = getattr(cell, "_tc", None)
-                marker = id(element) if element is not None else id(cell)
-                if marker in seen_cells:
+                if cell._tc in seen:
                     continue
-                seen_cells.add(marker)
-                for paragraph in cell.paragraphs:
-                    add(paragraph)
+                seen.add(cell._tc)
+                paragraphs.extend(_docx_paragraphs(cell, seen))
+    return paragraphs
+
+
+def _docx_header_footers(document) -> list:
+    parts = []
     for section in document.sections:
-        for part in (section.header, section.footer):
-            for paragraph in part.paragraphs:
-                add(paragraph)
+        for part in (
+            section.header,
+            section.footer,
+            section.first_page_header,
+            section.first_page_footer,
+            section.even_page_header,
+            section.even_page_footer,
+        ):
+            # A linked part has no definition of its own. Reading it would add one.
+            if not part.is_linked_to_previous:
+                parts.append(part)
+    return parts
+
+
+def _docx_text_box_paragraphs(root, parent, seen: set) -> list[tuple[object, bool]]:
+    """Text box paragraphs. The VML copy under mc:Fallback is edited but not counted."""
+    found = []
+    for element in root.xpath(".//w:txbxContent//w:p"):
+        if element in seen:
+            continue
+        seen.add(element)
+        counted = not element.xpath("ancestor::*[local-name()='Fallback']")
+        found.append((Paragraph(element, parent), counted))
+    return found
+
+
+def _docx_note_parts(document) -> list[tuple[object, object]]:
+    """Footnotes, endnotes, and comments. python-docx keeps notes as raw bytes, so they are parsed here."""
+    found = []
+    for rel in document.part.rels.values():
+        if rel.is_external or rel.reltype not in _DOCX_NOTE_RELS:
+            continue
+        part = rel.target_part
+        root = part.element if hasattr(part, "element") else parse_xml(part.blob)
+        found.append((part, root))
+    return found
+
+
+def _docx_note_paragraphs(root, parent, seen: set) -> list[tuple[object, bool]]:
+    found = []
+    for element in root.iter(f"{{{nsmap['w']}}}p"):
+        if element in seen:
+            continue
+        seen.add(element)
+        counted = not element.xpath("ancestor::*[local-name()='Fallback']")
+        found.append((Paragraph(element, parent), counted))
+    return found
+
+
+def _replace_docx(document, edits: list[tuple[str, str]]) -> int:
+    seen: set = set()
+    parts = _docx_header_footers(document)
+    targets = [(paragraph, True, None) for paragraph in _docx_paragraphs(document, seen)]
+    for part in parts:
+        targets.extend((paragraph, True, None) for paragraph in _docx_paragraphs(part, seen))
+    targets.extend((p, counted, None) for p, counted in _docx_text_box_paragraphs(document.element.body, document, seen))
+    for part in parts:
+        targets.extend((p, counted, None) for p, counted in _docx_text_box_paragraphs(part._element, part, seen))
+    for part, root in _docx_note_parts(document):
+        targets.extend((p, counted, (part, root)) for p, counted in _docx_note_paragraphs(root, document, seen))
+    total = 0
+    changed = {}
     for find, replace in edits:
-        for paragraph in paragraphs:
-            total += _replace_paragraph(paragraph, find, replace)
+        for paragraph, counted, owner in targets:
+            matched = _replace_runs(_docx_runs(paragraph), find, replace)
+            if counted:
+                total += matched
+            if matched and owner is not None:
+                changed[id(owner[0])] = owner
+    for part, root in changed.values():
+        if not hasattr(part, "element"):
+            part._blob = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     return total
 
 
@@ -572,22 +668,6 @@ def _write_sheet_body(worksheet, headers: list[str], rows: list[list]) -> None:
         _write_row(worksheet, next_row + offset, row)
 
 
-def _next_row(worksheet) -> int:
-    if worksheet.max_row == 1 and worksheet.max_column == 1 and worksheet.cell(1, 1).value is None:
-        return 1
-    return worksheet.max_row + 1
-
-
-def _find_sheet(workbook, name: str, *, required: bool):
-    target = name.casefold()
-    for worksheet in workbook.worksheets:
-        if worksheet.title.casefold() == target:
-            return worksheet
-    if required:
-        raise OfficeDocumentError("VALIDATION_ERROR", f"sheet not found: {name}")
-    return None
-
-
 def _parse_slides(values, *, required: bool, budget: dict[str, int]) -> list[dict]:
     if not values:
         if required:
@@ -678,17 +758,18 @@ def _add_slide(presentation, spec: dict) -> None:
         slide.notes_slide.notes_text_frame.text = spec["notes"]
 
 
-def _set_slide_title(presentation, slide, title: str) -> None:
-    target = None
+def _title_shape(slide):
     for shape in _walk_shapes(slide.shapes):
         if getattr(shape, "name", "") == "Title" and getattr(shape, "has_text_frame", False):
-            target = shape
-            break
-    if target is None:
-        for shape in _walk_shapes(slide.shapes):
-            if getattr(shape, "has_text_frame", False):
-                target = shape
-                break
+            return shape
+    placeholder = slide.shapes.title
+    if placeholder is not None and placeholder.has_text_frame:
+        return placeholder
+    return None
+
+
+def _set_slide_title(presentation, slide, title: str) -> None:
+    target = _title_shape(slide)
     if target is None:
         width = presentation.slide_width or Inches(13.333333)
         target = slide.shapes.add_textbox(Inches(0.5), Inches(0.35), Emu(max(int(width - Inches(1)), int(Inches(4)))), Inches(1.15))
@@ -718,17 +799,13 @@ def _replace_text_frame(frame, find: str, replace: str) -> int:
     total = 0
     for paragraph in frame.paragraphs:
         runs = list(paragraph.runs)
-        full = "".join(run.text or "" for run in runs) if runs else (paragraph.text or "")
-        if find not in full:
-            continue
-        updated = full.replace(find, replace)
         if runs:
-            runs[0].text = updated
-            for run in runs[1:]:
-                run.text = ""
-        else:
-            paragraph.text = updated
-        total += full.count(find)
+            total += _replace_runs(runs, find, replace)
+            continue
+        full = paragraph.text or ""
+        if find in full:
+            paragraph.text = full.replace(find, replace)
+            total += full.count(find)
     return total
 
 
@@ -754,7 +831,7 @@ def _replace_pptx(presentation, edits: list[tuple[str, str]]) -> int:
 def _decode_package(content_base64: str, kind: str) -> bytes:
     if not isinstance(content_base64, str) or content_base64.strip() == "":
         raise OfficeDocumentError("VALIDATION_ERROR", "content_base64 is required")
-    compact = "".join(content_base64.split())
+    compact = standard_base64("".join(content_base64.split()))
     if len(compact) > MAX_BASE64_CHARS:
         raise OfficeDocumentError("VALIDATION_ERROR", f"File exceeds {MAX_BYTES} bytes")
     try:
@@ -802,15 +879,6 @@ def _open_docx(raw: bytes):
         raise
     except Exception as exc:
         raise OfficeDocumentError("INVALID_OFFICE_FILE", "Could not read Word document") from exc
-
-
-def _open_xlsx(raw: bytes):
-    try:
-        return load_workbook(io.BytesIO(raw))
-    except OfficeDocumentError:
-        raise
-    except Exception as exc:
-        raise OfficeDocumentError("INVALID_OFFICE_FILE", "Could not read Excel workbook") from exc
 
 
 def _open_pptx(raw: bytes):
@@ -874,7 +942,10 @@ def _package(document, file_name: str, kind: str, replacements: int | None = Non
     except Exception as exc:
         label = {"docx": "Word document", "xlsx": "Excel workbook", "pptx": "PowerPoint presentation"}[kind]
         raise OfficeDocumentError("INVALID_OFFICE_FILE", f"Could not build {label}") from exc
-    raw = buffer.getvalue()
+    return _finish(buffer.getvalue(), file_name, kind, replacements)
+
+
+def _finish(raw: bytes, file_name: str, kind: str, replacements: int | None = None) -> OfficeFile:
     if len(raw) > MAX_BYTES:
         raise OfficeDocumentError("VALIDATION_ERROR", f"File exceeds {MAX_BYTES} bytes")
     _assert_ooxml(raw, kind, cap_entries=False)

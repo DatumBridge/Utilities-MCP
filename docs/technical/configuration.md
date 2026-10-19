@@ -1,6 +1,6 @@
 # Configuration
 
-No environment variables. Runtime dependencies are `requirements_mcp.txt` (`python-docx`, `openpyxl`, `python-pptx`).
+No environment variables. Runtime dependencies are `requirements_mcp.txt` (`python-docx`, `openpyxl`, `python-pptx`, `lxml`).
 
 Limits are constants in `app/services/office_documents.py`:
 

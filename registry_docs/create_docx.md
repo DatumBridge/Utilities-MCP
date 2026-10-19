@@ -23,7 +23,7 @@ When the user wants a new Word document. Then pass `content_base64` and `file_na
 | `file_name` | no | string | `"notes.docx"` | — | Base name ending with `.docx`. Default `document.docx`. Not a path. |
 | `title` | no | string | `"Notes"` | — | Written first as Heading 1. |
 | `paragraphs` | no | array | `[{"text": "Hello", "heading_level": 0}]` | — | After the title. `heading_level` is 0 (body), 1, 2, or 3. |
-| `tables` | no | array | `[{"headers": ["Item", "Qty"], "rows": [["Paper", "2"]]}]` | — | Appended after paragraphs. Cells are strings. |
+| `tables` | no | array | `[{"headers": ["Item", "Qty"], "rows": [["Paper", "2"]]}]` | — | Appended after paragraphs. Cells are strings. An empty paragraph separates adjacent tables so Word keeps them apart. |
 
 Provide a title, at least one paragraph, or at least one table.
 

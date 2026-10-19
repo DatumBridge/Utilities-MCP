@@ -1,12 +1,12 @@
 # decode_base64
 
-Decode standard Base64 to UTF-8 text or to a JSON value. Invalid Base64, invalid UTF-8, and invalid JSON fail closed.
+Decode Base64 to UTF-8 text or to a JSON value. Standard Base64, URL-safe Base64 (Gmail), a `data:...;base64,` URL, and missing padding are accepted. Invalid Base64, invalid UTF-8, and invalid JSON fail closed.
 
 ## Parameters
 
 | Name | Required | Meaning |
 |---|---|---|
-| `content_base64` | yes | Standard Base64 payload. |
+| `content_base64` | yes | Base64 payload. Standard or URL-safe; a data URL or missing padding also works. |
 | `as_format` | no | `text` or `json`. Catalog alias: `as`. Default `text`. |
 | `encoding` | no | Only `utf-8`. |
 
